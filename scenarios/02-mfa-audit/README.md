@@ -1,4 +1,4 @@
-[02-mfa-audit-README.md](https://github.com/user-attachments/files/24577754/02-mfa-audit-README.md)
+
 # 02-mfa-audit
 
 ## Problem
