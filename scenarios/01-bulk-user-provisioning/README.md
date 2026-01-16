@@ -73,4 +73,3 @@ The script also defines a temporary password which is forced to be changed upon 
 
 ---
 
-To use this, save this file as `README.md` in the `01-bulk-user-provisioning` folder of your repository.
