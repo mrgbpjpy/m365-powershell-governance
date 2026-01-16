@@ -2,23 +2,52 @@
 # Scenario: 06-meeting-policy-export
 # Description: Export Teams meeting policies.
 
-Write-Host "Connecting to Microsoft Graph..."
-# Connect-MgGraph -Scopes "User.Read.All","Directory.Read.All","AuditLog.Read.All"
+#Requires -Module Microsoft.Graph.Teams
 
-Write-Host "Running scenario: 06-meeting-policy-export"
+<#
+.SYNOPSIS
+Exports Microsoft Teams meeting policies.
+
+.DESCRIPTION
+- Retrieves all Teams meeting policies
+- Summarizes key settings
+- Exports CSV for governance review
+
+Required Scopes:
+Policy.Read.All
+#>
+
+param(
+    [string]$ReportPath = ("Teams_Meeting_Policies-{0}.csv" -f (Get-Date -Format 'yyyyMMdd'))
+)
+
+Write-Host "Connecting to Microsoft Graph..."
+Connect-MgGraph -Scopes "Policy.Read.All" | Out-Null
+Write-Host "Connected."
+
+Write-Host "Retrieving Teams meeting policies..."
+$policies = Get-MgPolicyOnlineMeetingPolicy -All
+
 $results = @()
 
-# Sample simulated data
-$results += [pscustomobject]@{
-    Item = "SampleObject1"
-    Status = "OK"
-    CheckedOn = "2026-01-13"
-}
-$results += [pscustomobject]@{
-    Item = "SampleObject2"
-    Status = "Review"
-    CheckedOn = "2026-01-13"
+foreach ($policy in $policies) {
+    $results += [pscustomobject]@{
+        PolicyName              = $policy.Identity
+        Description             = $policy.Description
+        AllowCloudRecording     = $policy.AllowCloudRecording
+        AllowTranscription      = $policy.AllowTranscription
+        AllowMeetingChat        = $policy.AllowMeetingChat
+        AllowAnonymousJoin      = $policy.AllowAnonymousJoin
+        AllowIPVideo            = $policy.AllowIPVideo
+        AllowMeetNow            = $policy.AllowMeetNow
+        MediaBitRateKb          = $policy.MediaBitRateKb
+        ScreenSharingMode       = $policy.ScreenSharingMode
+        WhoCanPresent           = $policy.WhoCanPresent
+    }
 }
 
-$results | Export-Csv "output-sample.csv" -NoTypeInformation
-Write-Host "Report exported to output-sample.csv"
+$results | Export-Csv -Path $ReportPath -NoTypeInformation
+
+Write-Host "Export complete. File saved to $ReportPath"
+
+Disconnect-MgGraph
