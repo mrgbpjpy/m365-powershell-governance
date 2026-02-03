@@ -30,8 +30,21 @@ Connect-MgGraph -Scopes "User.Read.All","Directory.Read.All","AuditLog.Read.All"
 Write-Host "Connected."
 
 Write-Host "Retrieving licensed users..."
-$props = "Id,DisplayName,UserPrincipalName,AccountEnabled,AssignedLicenses,SignInActivity"
-$users = Get-MgUser -All -Property $props | Where-Object { $_.AssignedLicenses.Count -gt 0 }
+$signInActivityAvailable = $true
+$propsBase = "Id,DisplayName,UserPrincipalName,AccountEnabled,AssignedLicenses"
+$propsWithSignIn = "$propsBase,SignInActivity"
+
+try {
+    $users = Get-MgUser -All -Property $propsWithSignIn -ErrorAction Stop |
+        Where-Object { $_.AssignedLicenses.Count -gt 0 }
+} catch {
+    $signInActivityAvailable = $false
+    $msg = $_.Exception.Message
+    Write-Warning "Unable to query SignInActivity (tenant may lack Entra ID Premium). Falling back to listing licensed users without last sign-in data. Error: $msg"
+
+    $users = Get-MgUser -All -Property $propsBase -ErrorAction Stop |
+        Where-Object { $_.AssignedLicenses.Count -gt 0 }
+}
 
 $total = $users.Count
 $counter = 0
@@ -40,24 +53,38 @@ $results = @()
 foreach ($user in $users) {
     $counter++
     Write-Progress -Activity "Auditing License Usage" `
-        -Status "Processing $counter of $total: $($user.UserPrincipalName)" `
+        -Status "Processing $counter of ${total}: $($user.UserPrincipalName)" `
         -PercentComplete (($counter / $total) * 100)
 
-    $lastSignIn = $user.SignInActivity.LastSignInDateTime
+    $lastSignIn = $null
+    if (($user.PSObject.Properties.Name -contains 'SignInActivity') -and $user.SignInActivity -and $user.SignInActivity.LastSignInDateTime) {
+        try { $lastSignIn = [datetime]$user.SignInActivity.LastSignInDateTime } catch { $lastSignIn = $null }
+    }
+
+    $daysInactive = $null
     if ($lastSignIn) {
         $daysInactive = (New-TimeSpan -Start $lastSignIn -End (Get-Date)).Days
         $inactive = if ($daysInactive -ge $InactiveDays) { "Yes" } else { "No" }
+        $reviewReason = if ($inactive -eq "Yes") { "Inactive >= $InactiveDays days" } else { "Active" }
     } else {
-        $inactive = "Yes"
+        if ($signInActivityAvailable) {
+            $inactive = "Yes"
+            $reviewReason = "No sign-in recorded"
+        } else {
+            $inactive = "Unknown"
+            $reviewReason = "SignInActivity unavailable"
+        }
     }
 
-    if ($inactive -eq "Yes") {
+    if ($inactive -in @("Yes","Unknown")) {
         $results += [pscustomobject]@{
             DisplayName       = $user.DisplayName
             UserPrincipalName = $user.UserPrincipalName
             AccountEnabled    = $user.AccountEnabled
             LastSignIn        = if ($lastSignIn) { $lastSignIn.ToString("yyyy-MM-dd") } else { "N/A" }
-            Inactive90Days    = $inactive
+            InactiveDays      = $daysInactive
+            InactiveOverThreshold = $inactive
+            ReviewReason      = $reviewReason
             LicenseCount      = $user.AssignedLicenses.Count
         }
     }
@@ -69,6 +96,7 @@ $results | Sort-Object LicenseCount -Descending |
 # Summary
 $totalFlagged = $results.Count
 $totalLicenses = ($results | Measure-Object LicenseCount -Sum).Sum
+if ($null -eq $totalLicenses) { $totalLicenses = 0 }
 
 Write-Host ""
 Write-Host "====== LICENSE OPTIMIZATION SUMMARY ======"
